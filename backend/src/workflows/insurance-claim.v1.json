@@ -1,0 +1,127 @@
+{
+  "workflowKey": "insurance-claim",
+  "name": "Auto & Property Insurance Claim Processing",
+  "version": 1,
+  "description": "Multi-tier claim adjudication workflow evaluating policy tenure, police report requirements, fraud risk models, and payout limits.",
+  "status": "ACTIVE",
+  "inputSchema": {
+    "type": "object",
+    "required": [
+      "policyNumber",
+      "claimantName",
+      "claimAmount",
+      "incidentType",
+      "incidentDate",
+      "policeReportFiled",
+      "priorClaimsCount",
+      "policyAgeMonths"
+    ],
+    "properties": {
+      "policyNumber": { "type": "string", "minLength": 5 },
+      "claimantName": { "type": "string", "minLength": 2 },
+      "claimAmount": { "type": "number", "minimum": 100 },
+      "incidentType": {
+        "type": "string",
+        "enum": ["COLLISION", "THEFT", "WEATHER", "VANDALISM", "FIRE"]
+      },
+      "incidentDate": { "type": "string" },
+      "policeReportFiled": { "type": "boolean" },
+      "priorClaimsCount": { "type": "integer", "minimum": 0 },
+      "policyAgeMonths": { "type": "integer", "minimum": 0 }
+    }
+  },
+  "stages": [
+    {
+      "id": "policy-claim-rules",
+      "name": "Policy Validity & Baseline Rules",
+      "type": "rule_evaluation",
+      "order": 1,
+      "rules": [
+        {
+          "id": "rule-policy-tenure",
+          "name": "Minimum Policy Age",
+          "field": "policyAgeMonths",
+          "operator": "gte",
+          "value": 1,
+          "failureAction": "reject",
+          "description": "Claims cannot be filed on policies active less than 1 month"
+        },
+        {
+          "id": "rule-prior-claims-limit",
+          "name": "Excessive Prior Claims Check",
+          "field": "priorClaimsCount",
+          "operator": "lte",
+          "value": 4,
+          "failureAction": "reject",
+          "description": "More than 4 historical claims automatically disqualifies standard processing"
+        },
+        {
+          "id": "rule-high-claim-review",
+          "name": "High Value Claim Check",
+          "field": "claimAmount",
+          "operator": "lte",
+          "value": 50000,
+          "failureAction": "manual_review",
+          "description": "Claims exceeding $50,000 require senior claims adjuster approval"
+        },
+        {
+          "id": "rule-theft-police-report",
+          "name": "Theft Police Report Requirement",
+          "condition": "incidentType === 'THEFT'",
+          "field": "policeReportFiled",
+          "operator": "eq",
+          "value": true,
+          "failureAction": "reject",
+          "description": "Theft claims mandate an official police report"
+        }
+      ]
+    },
+    {
+      "id": "fraud-detection-service",
+      "name": "AI Fraud Risk Assessment",
+      "type": "external_verification",
+      "order": 2,
+      "dependencyName": "fraud-detection-service",
+      "endpoint": "/external/fraud-detector/evaluate",
+      "retryPolicy": {
+        "maxRetries": 3,
+        "initialBackoffMs": 300,
+        "backoffMultiplier": 2,
+        "retryableStatuses": ["TIMEOUT", "TEMPORARY_FAILURE", "NETWORK_ERROR"]
+      },
+      "postVerificationRules": [
+        {
+          "id": "rule-fraud-hard-cap",
+          "name": "Maximum Fraud Score Cap",
+          "field": "fraudScore",
+          "operator": "lte",
+          "value": 75,
+          "failureAction": "reject",
+          "description": "Fraud score above 75 triggers immediate claim rejection"
+        },
+        {
+          "id": "rule-fraud-review-band",
+          "name": "Elevated Fraud Score Band",
+          "field": "fraudScore",
+          "operator": "lte",
+          "value": 35,
+          "failureAction": "manual_review",
+          "description": "Fraud score between 36 and 75 routes claim to Special Investigation Unit (SIU)"
+        }
+      ]
+    },
+    {
+      "id": "manual-review-stage",
+      "name": "Claims Adjuster Review",
+      "type": "manual_review",
+      "order": 3
+    },
+    {
+      "id": "final-decision-stage",
+      "name": "Final Adjudication",
+      "type": "final_decision",
+      "order": 4
+    }
+  ]
+}
+

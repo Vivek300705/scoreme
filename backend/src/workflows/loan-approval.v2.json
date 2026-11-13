@@ -1,0 +1,141 @@
+{
+  "workflowKey": "loan-approval",
+  "name": "Retail Loan Application Approval",
+  "version": 2,
+  "description": "Updated risk parameters: elevated monthly income floor to $30,000 and tightened prime credit tier to 700.",
+  "status": "DRAFT",
+  "inputSchema": {
+    "type": "object",
+    "required": [
+      "applicantName",
+      "age",
+      "monthlyIncome",
+      "requestedAmount",
+      "creditScore",
+      "employmentStatus",
+      "existingMonthlyDebt"
+    ],
+    "properties": {
+      "applicantName": { "type": "string", "minLength": 2 },
+      "age": { "type": "integer", "minimum": 18, "maximum": 100 },
+      "monthlyIncome": { "type": "number", "minimum": 0 },
+      "requestedAmount": { "type": "number", "minimum": 1000 },
+      "creditScore": { "type": "integer", "minimum": 300, "maximum": 850 },
+      "employmentStatus": {
+        "type": "string",
+        "enum": ["EMPLOYED", "SELF_EMPLOYED", "UNEMPLOYED", "RETIRED"]
+      },
+      "existingMonthlyDebt": { "type": "number", "minimum": 0 }
+    }
+  },
+  "stages": [
+    {
+      "id": "eligibility-rules",
+      "name": "Applicant Eligibility Checks",
+      "type": "rule_evaluation",
+      "order": 1,
+      "rules": [
+        {
+          "id": "rule-min-age",
+          "name": "Legal Adult Age Check",
+          "field": "age",
+          "operator": "gte",
+          "value": 18,
+          "failureAction": "reject",
+          "description": "Applicant must be at least 18 years old"
+        },
+        {
+          "id": "rule-min-income",
+          "name": "Minimum Monthly Income",
+          "field": "monthlyIncome",
+          "operator": "gte",
+          "value": 30000,
+          "failureAction": "reject",
+          "description": "V2 Policy: Monthly income must be at least $30,000"
+        },
+        {
+          "id": "rule-employment",
+          "name": "Permitted Employment Status",
+          "field": "employmentStatus",
+          "operator": "in",
+          "value": ["EMPLOYED", "SELF_EMPLOYED", "RETIRED"],
+          "failureAction": "reject",
+          "description": "Applicant cannot be unemployed"
+        },
+        {
+          "id": "rule-credit-score-hard",
+          "name": "Minimum Credit Score Threshold",
+          "field": "creditScore",
+          "operator": "gte",
+          "value": 620,
+          "failureAction": "reject",
+          "description": "Credit score below 620 is rejected outright"
+        },
+        {
+          "id": "rule-credit-score-tier",
+          "name": "Prime Credit Score Check",
+          "field": "creditScore",
+          "operator": "gte",
+          "value": 700,
+          "failureAction": "manual_review",
+          "description": "Credit score between 620 and 699 requires manual underwriter review"
+        },
+        {
+          "id": "rule-debt-to-income",
+          "name": "Debt to Income Ratio Check",
+          "field": "debtToIncomeRatio",
+          "derived": "existingMonthlyDebt / monthlyIncome",
+          "operator": "lte",
+          "value": 0.40,
+          "failureAction": "reject",
+          "description": "Debt-to-income ratio must not exceed 40%"
+        }
+      ]
+    },
+    {
+      "id": "credit-bureau-verification",
+      "name": "External Credit Bureau Integration",
+      "type": "external_verification",
+      "order": 2,
+      "dependencyName": "credit-bureau-service",
+      "endpoint": "/external/credit-bureau/verify",
+      "retryPolicy": {
+        "maxRetries": 3,
+        "initialBackoffMs": 300,
+        "backoffMultiplier": 2,
+        "retryableStatuses": ["TIMEOUT", "TEMPORARY_FAILURE", "NETWORK_ERROR"]
+      },
+      "postVerificationRules": [
+        {
+          "id": "rule-bureau-status",
+          "name": "Bureau Record Active",
+          "field": "bureauStatus",
+          "operator": "eq",
+          "value": "VERIFIED",
+          "failureAction": "reject"
+        },
+        {
+          "id": "rule-bureau-risk",
+          "name": "Acceptable Bureau Risk Level",
+          "field": "riskTier",
+          "operator": "in",
+          "value": ["LOW", "MODERATE"],
+          "failureAction": "manual_review"
+        }
+      ]
+    },
+    {
+      "id": "manual-review-stage",
+      "name": "Underwriter Review",
+      "type": "manual_review",
+      "order": 3
+    },
+    {
+      "id": "final-decision-stage",
+      "name": "Final Decision Consolidation",
+      "type": "final_decision",
+      "order": 4
+    }
+  ]
+}
+
