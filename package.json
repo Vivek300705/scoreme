@@ -1,0 +1,31 @@
+{
+  "name": "flowguard-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "FlowGuard – Configurable Workflow Decision & Resilience Engine",
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "start": "npm run start --workspace=backend",
+    "dev:backend": "npm run dev --workspace=backend",
+    "dev:frontend": "npm run dev --workspace=frontend",
+    "test": "npm run test --workspace=backend",
+    "test:coverage": "npm run test:coverage --workspace=backend",
+    "seed": "npm run seed --workspace=backend",
+    "build": "npm run build --workspace=backend && npm run build --workspace=frontend",
+    "docker:up": "docker-compose up --build -d",
+    "docker:down": "docker-compose down -v"
+  },
+  "keywords": [
+    "workflow",
+    "decision-engine",
+    "resilience",
+    "idempotency",
+    "audit-trail"
+  ],
+  "author": "FlowGuard Team",
+  "license": "Apache-2.0"
+}
+
