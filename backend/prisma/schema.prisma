@@ -1,0 +1,175 @@
+// FlowGuard Decision Engine - PostgreSQL Database Schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model WorkflowDefinition {
+  id               String            @id @default(uuid())
+  workflowKey      String            @unique @map("workflow_key")
+  name             String
+  description      String?
+  activeVersionId  String?           @map("active_version_id")
+  createdAt        DateTime          @default(now()) @map("created_at")
+  updatedAt        DateTime          @updatedAt @map("updated_at")
+  versions         WorkflowVersion[]
+  executions       WorkflowExecution[]
+
+  @@map("workflow_definitions")
+}
+
+model WorkflowVersion {
+  id           String             @id @default(uuid())
+  workflowId   String             @map("workflow_id")
+  version      Int
+  status       String             @default("ACTIVE") // ACTIVE, DRAFT, ARCHIVED
+  inputSchema  Json               @map("input_schema")
+  stages       Json
+  metadata     Json?
+  createdAt    DateTime           @default(now()) @map("created_at")
+  workflow     WorkflowDefinition @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  executions   WorkflowExecution[]
+
+  @@unique([workflowId, version])
+  @@index([workflowId, status])
+  @@map("workflow_versions")
+}
+
+model WorkflowExecution {
+  id                 String                       @id @default(uuid())
+  workflowId         String                       @map("workflow_id")
+  workflowVersionId  String                       @map("workflow_version_id")
+  idempotencyKey     String?                      @unique @map("idempotency_key")
+  currentState       String                       @default("RECEIVED") @map("current_state")
+  inputData          Json                         @map("input_data")
+  contextData        Json?                        @default("{}") @map("context_data")
+  finalDecision      String?                      @map("final_decision") // APPROVED, REJECTED, MANUAL_REVIEW, FAILED
+  decisionReason     String?                      @map("decision_reason")
+  retryCount         Int                          @default(0) @map("retry_count")
+  maxRetries         Int                          @default(3) @map("max_retries")
+  nextRetryAt        DateTime?                    @map("next_retry_at")
+  correlationId      String                       @map("correlation_id")
+  createdAt          DateTime                     @default(now()) @map("created_at")
+  updatedAt          DateTime                     @updatedAt @map("updated_at")
+
+  workflow           WorkflowDefinition           @relation(fields: [workflowId], references: [id])
+  version            WorkflowVersion              @relation(fields: [workflowVersionId], references: [id])
+  stateHistory       WorkflowStateHistory[]
+  ruleEvaluations    RuleEvaluation[]
+  auditLogs          AuditLog[]
+  dependencyAttempts ExternalDependencyAttempt[]
+  manualReview       ManualReview?
+  idempotencyRecord  IdempotencyRecord?
+
+  @@index([workflowId, currentState])
+  @@index([correlationId])
+  @@index([createdAt])
+  @@map("workflow_executions")
+}
+
+model WorkflowStateHistory {
+  id               String            @id @default(uuid())
+  executionId      String            @map("execution_id")
+  fromState        String            @map("from_state")
+  toState          String            @map("to_state")
+  transitionReason String?           @map("transition_reason")
+  metadata         Json?
+  createdAt        DateTime          @default(now()) @map("created_at")
+  execution        WorkflowExecution @relation(fields: [executionId], references: [id], onDelete: Cascade)
+
+  @@index([executionId, createdAt])
+  @@map("workflow_state_history")
+}
+
+model RuleEvaluation {
+  id            String            @id @default(uuid())
+  executionId   String            @map("execution_id")
+  stageId       String            @map("stage_id")
+  ruleId        String            @map("rule_id")
+  ruleName      String            @map("rule_name")
+  field         String
+  operator      String
+  expectedValue Json              @map("expected_value")
+  actualValue   Json?             @map("actual_value")
+  passed        Boolean
+  failureAction String            @default("reject") @map("failure_action") // reject, manual_review, retry, warn
+  explanation   String
+  evaluatedAt   DateTime          @default(now()) @map("evaluated_at")
+  execution     WorkflowExecution @relation(fields: [executionId], references: [id], onDelete: Cascade)
+
+  @@index([executionId, stageId])
+  @@map("rule_evaluations")
+}
+
+model AuditLog {
+  id            String            @id @default(uuid())
+  executionId   String            @map("execution_id")
+  correlationId String            @map("correlation_id")
+  eventType     String            @map("event_type")
+  previousState String?           @map("previous_state")
+  newState      String?           @map("new_state")
+  details       Json
+  stageId       String?           @map("stage_id")
+  ruleId        String?           @map("rule_id")
+  createdAt     DateTime          @default(now()) @map("created_at")
+  execution     WorkflowExecution @relation(fields: [executionId], references: [id], onDelete: Cascade)
+
+  @@index([executionId, createdAt])
+  @@index([correlationId])
+  @@index([eventType])
+  @@map("audit_logs")
+}
+
+model IdempotencyRecord {
+  id             String             @id @default(uuid())
+  idempotencyKey String             @unique @map("idempotency_key")
+  requestHash    String             @map("request_hash")
+  workflowKey    String             @map("workflow_key")
+  executionId    String?            @unique @map("execution_id")
+  status         String             @default("PENDING") // PENDING, COMPLETED, FAILED
+  responseCode   Int?               @map("response_code")
+  responseBody   Json?              @map("response_body")
+  expiresAt      DateTime           @map("expires_at")
+  createdAt      DateTime           @default(now()) @map("created_at")
+  execution      WorkflowExecution? @relation(fields: [executionId], references: [id], onDelete: SetNull)
+
+  @@index([idempotencyKey, requestHash])
+  @@map("idempotency_records")
+}
+
+model ExternalDependencyAttempt {
+  id              String            @id @default(uuid())
+  executionId     String            @map("execution_id")
+  dependencyName  String            @map("dependency_name")
+  attemptNumber   Int               @map("attempt_number")
+  status          String            // SUCCESS, TEMPORARY_FAILURE, PERMANENT_FAILURE, TIMEOUT
+  errorMessage    String?           @map("error_message")
+  requestPayload  Json              @map("request_payload")
+  responsePayload Json?             @map("response_payload")
+  latencyMs       Int               @map("latency_ms")
+  createdAt       DateTime          @default(now()) @map("created_at")
+  execution       WorkflowExecution @relation(fields: [executionId], references: [id], onDelete: Cascade)
+
+  @@index([executionId, dependencyName])
+  @@map("external_dependency_attempts")
+}
+
+model ManualReview {
+  id            String            @id @default(uuid())
+  executionId   String            @unique @map("execution_id")
+  status        String            @default("PENDING") // PENDING, APPROVED, REJECTED
+  reviewerId    String?           @map("reviewer_id")
+  reviewerNotes String?           @map("reviewer_notes")
+  assignedAt    DateTime          @default(now()) @map("assigned_at")
+  decidedAt     DateTime?         @map("decided_at")
+  execution     WorkflowExecution @relation(fields: [executionId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@map("manual_reviews")
+}
+
