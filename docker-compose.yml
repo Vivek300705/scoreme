@@ -1,0 +1,68 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: flowguard-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: flowguard
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d flowguard"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - flowguard-net
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: flowguard-backend
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PORT: 4000
+      NODE_ENV: production
+      DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/flowguard?schema=public"
+      IDEMPOTENCY_EXPIRY_SECONDS: 86400
+      DEFAULT_MAX_RETRIES: 3
+      DEFAULT_INITIAL_BACKOFF_MS: 300
+      DEFAULT_BACKOFF_MULTIPLIER: 2
+      SIMULATION_LATENCY_MS: 50
+      SIMULATION_FAILURE_MODE: NONE
+    ports:
+      - "4000:4000"
+    networks:
+      - flowguard-net
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: flowguard-frontend
+    restart: always
+    depends_on:
+      - backend
+    ports:
+      - "5173:80"
+    networks:
+      - flowguard-net
+
+volumes:
+  pgdata:
+    driver: local
+
+networks:
+  flowguard-net:
+    driver: bridge
+
